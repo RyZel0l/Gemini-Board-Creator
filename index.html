@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite Creative Board</title>
+    <style>
+        :root {
+            --bg-color: #08080a;
+            --accent: #ff4757;
+            --note-y: #fff385;
+            --glass: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background-color: var(--bg-color);
+            color: white;
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #viewport {
+            width: 100vw; height: 100vh;
+            overflow: hidden; position: relative;
+            background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0);
+            background-size: 40px 40px;
+        }
+
+        #world {
+            position: absolute; top: 0; left: 0;
+            transform-origin: 0 0;
+            will-change: transform;
+        }
+
+        #canvas-svg {
+            position: absolute; top: 0; left: 0;
+            width: 100000px; height: 100000px;
+            pointer-events: none; z-index: 1;
+        }
+
+        /* --- Toolbar --- */
+        .toolbar {
+            position: fixed; top: 25px; left: 50%;
+            transform: translateX(-50%);
+            display: flex; gap: 12px;
+            background: rgba(20, 20, 25, 0.8);
+            padding: 12px 24px;
+            border-radius: 100px;
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+            border: 1px solid var(--border);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+
+        .toolbar button {
+            background: white; border: none;
+            padding: 10px 20px; border-radius: 50px;
+            cursor: pointer; font-weight: 700;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 4px 0 #cbd5e0;
+            color: #1a202c;
+        }
+
+        .toolbar button:hover { transform: translateY(-3px); box-shadow: 0 7px 0 #cbd5e0; }
+        .toolbar button:active { transform: translateY(1px); box-shadow: 0 2px 0 #cbd5e0; }
+
+        /* --- Elements --- */
+        .pin {
+            width: 18px; height: 18px;
+            background: var(--accent); border-radius: 50%;
+            cursor: crosshair; position: relative;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3), inset 0 -2px 4px rgba(0,0,0,0.4);
+            border: 2px solid #9e1c26;
+        }
+
+        .note {
+            position: absolute; width: 220px; min-height: 220px;
+            background: var(--note-y); color: #1a202c;
+            padding: 12px; border-radius: 4px;
+            box-shadow: 15px 15px 35px rgba(0,0,0,0.4);
+            display: flex; flex-direction: column;
+        }
+
+        .note.selected { outline: 4px solid #48bb78; z-index: 100 !important; }
+
+        .note-header {
+            height: 35px; display: flex; justify-content: space-between;
+            align-items: center; cursor: move; margin: -12px -12px 12px -12px;
+            padding: 0 12px; background: rgba(0,0,0,0.03);
+        }
+
+        .note-content { flex-grow: 1; border: none; background: transparent; resize: none; outline: none; }
+
+        .group {
+            position: absolute; width: 400px; height: 400px;
+            background: var(--glass); border: 2px dashed var(--border);
+            border-radius: 20px; padding: 20px; backdrop-filter: blur(5px);
+            z-index: 5;
+        }
+
+        .group-header { cursor: move; display: flex; align-items: center; gap: 12px; margin-bottom: 15px; }
+        .group-title { background: transparent; border: none; color: white; font-weight: 800; outline: none; width: 150px; }
+
+        .resizer {
+            width: 15px; height: 15px;
+            background: var(--border);
+            position: absolute; right: 10px; bottom: 10px;
+            cursor: nwse-resize; border-radius: 2px;
+        }
+
+        .drop-zone {
+            position: absolute; right: -20px; top: 20%; width: 40px; height: 60%;
+            background: rgba(0,255,0,0.1); border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            writing-mode: vertical-rl; font-size: 10px; color: #48bb78;
+            pointer-events: none;
+        }
+
+        .group.collapsed { height: 60px !important; width: 200px !important; overflow: hidden; border-style: solid; }
+        .group.collapsed .drop-zone, .group.collapsed .note, .group.collapsed .resizer { display: none !important; }
+
+        canvas { background: white; border-radius: 12px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="toolbar">
+    <button onclick="createNote()">+ Note</button>
+    <button onclick="createGroup()">+ Group</button>
+    <button onclick="createDrawBoard()">+ Sketch</button>
+    <button onclick="duplicateSelected()">📋 Copy</button>
+    <button onclick="deleteSelected()" style="background: #ff4757; color: white; box-shadow: 0 4px 0 #b33939;">Delete</button>
+    <button onclick="clearAll()" style="background: #8e1c26; color: white; box-shadow: 0 4px 0 #5e0d14;">Clear All</button>
+</div>
+
+<div id="viewport">
+    <div id="world">
+        <svg id="canvas-svg"></svg>
+        <div id="board-container"></div>
+    </div>
+</div>
+
+<script>
+    const viewport = document.getElementById('viewport');
+    const world = document.getElementById('world');
+    const board = document.getElementById('board-container');
+    const svg = document.getElementById('canvas-svg');
+
+    let scale = 1, posX = 0, posY = 0;
+    let selectedElement = null;
+    let connections = [];
+    let isDrawingLine = null;
+    let zStack = 100;
+
+    // --- Smooth Zoom ---
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomIntensity = 0.1;
+        const delta = e.deltaY > 0 ? -zoomIntensity : zoomIntensity;
+        const oldScale = scale;
+        scale *= (1 + delta);
+        scale = Math.min(Math.max(0.05, scale), 4);
+        const mouseX = e.clientX;
+        const mouseY = e.clientY;
+        posX -= (mouseX / oldScale - mouseX / scale) * scale;
+        posY -= (mouseY / oldScale - mouseY / scale) * scale;
+        updateTransform();
+    }, { passive: false });
+
+    // --- Panning ---
+    viewport.addEventListener('mousedown', (e) => {
+        if (e.button === 1) {
+            e.preventDefault();
+            let startX = e.clientX - posX;
+            let startY = e.clientY - posY;
+            const onMove = (ev) => {
+                posX = ev.clientX - startX;
+                posY = ev.clientY - startY;
+                updateTransform();
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        }
+    });
+
+    function updateTransform() {
+        world.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+        updateLines();
+    }
+
+    // --- Actions ---
+    function clearAll() {
+        if (confirm("Are you sure you want to delete EVERYTHING? This cannot be undone.")) {
+            board.innerHTML = "";
+            connections = [];
+            updateLines();
+            selectedElement = null;
+        }
+    }
+
+    function makeResizable(group) {
+        const resizer = group.querySelector('.resizer');
+        resizer.onmousedown = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            let startW = group.offsetWidth;
+            let startH = group.offsetHeight;
+            let startX = e.clientX;
+            let startY = e.clientY;
+
+            const doResize = (ev) => {
+                group.style.width = startW + (ev.clientX - startX) / scale + 'px';
+                group.style.height = startH + (ev.clientY - startY) / scale + 'px';
+                updateLines();
+            };
+
+            const stopResize = () => {
+                document.removeEventListener('mousemove', doResize);
+                document.removeEventListener('mouseup', stopResize);
+            };
+
+            document.addEventListener('mousemove', doResize);
+            document.addEventListener('mouseup', stopResize);
+        };
+    }
+
+    function makeDraggable(el, header) {
+        let p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+        header.onmousedown = (e) => {
+            if (e.button !== 0 || e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+            e.stopPropagation();
+            selectElement(el);
+            p3 = e.clientX; p4 = e.clientY;
+
+            document.onmousemove = (ev) => {
+                p1 = (p3 - ev.clientX) / scale;
+                p2 = (p4 - ev.clientY) / scale;
+                p3 = ev.clientX; p4 = ev.clientY;
+                el.style.top = (el.offsetTop - p2) + "px";
+                el.style.left = (el.offsetLeft - p1) + "px";
+                updateLines();
+            };
+
+            document.onmouseup = () => {
+                document.onmousemove = null;
+                if (!el.classList.contains('group')) checkDropIntoGroup(el);
+            };
+        };
+    }
+
+    function createNote(x, y) {
+        const id = 'note-' + Date.now();
+        const note = document.createElement('div');
+        note.className = 'note';
+        note.id = id;
+        note.style.left = x || `${(window.innerWidth/2 - 110 - posX) / scale}px`;
+        note.style.top = y || `${(window.innerHeight/2 - 110 - posY) / scale}px`;
+        note.innerHTML = `
+            <div class="note-header">
+                <div class="pin" onclick="handlePinClick(this)"></div>
+                <input type="color" onchange="this.parentElement.parentElement.style.background=this.value" value="#fff385" style="width:20px; border:none; background:none;">
+            </div>
+            <textarea class="note-content" placeholder="Write..."></textarea>
+        `;
+        board.appendChild(note);
+        makeDraggable(note, note.querySelector('.note-header'));
+    }
+
+    function createGroup() {
+        const group = document.createElement('div');
+        group.className = 'group';
+        group.style.left = `${(window.innerWidth/2 - 200 - posX) / scale}px`;
+        group.style.top = `${(window.innerHeight/2 - 200 - posY) / scale}px`;
+        group.innerHTML = `
+            <div class="group-header">
+                <span onclick="this.closest('.group').classList.toggle('collapsed'); updateLines();" style="cursor:pointer">▼</span>
+                <input type="text" class="group-title" value="New Group">
+            </div>
+            <div class="drop-zone">DROP HERE</div>
+            <div class="resizer"></div>
+        `;
+        board.appendChild(group);
+        makeDraggable(group, group.querySelector('.group-header'));
+        makeResizable(group);
+    }
+
+    function checkDropIntoGroup(note) {
+        const groups = document.querySelectorAll('.group');
+        const nRect = note.getBoundingClientRect();
+        groups.forEach(group => {
+            if (group.classList.contains('collapsed')) return;
+            const dropZone = group.querySelector('.drop-zone').getBoundingClientRect();
+            if (nRect.left < dropZone.right && nRect.right > dropZone.left &&
+                nRect.top < dropZone.bottom && nRect.bottom > dropZone.top) {
+                const gRect = group.getBoundingClientRect();
+                group.appendChild(note);
+                note.style.left = `${(nRect.left - gRect.left) / scale}px`;
+                note.style.top = `${(nRect.top - gRect.top) / scale}px`;
+            }
+        });
+    }
+
+    function handlePinClick(pin) {
+        const noteId = pin.closest('.note').id;
+        if (!isDrawingLine) {
+            isDrawingLine = noteId;
+            pin.style.boxShadow = "0 0 15px #fff";
+        } else {
+            if (isDrawingLine !== noteId) {
+                connections.push({ from: isDrawingLine, to: noteId });
+                updateLines();
+            }
+            document.querySelectorAll('.pin').forEach(p => p.style.boxShadow = "");
+            isDrawingLine = null;
+        }
+    }
+
+    function updateLines() {
+        svg.innerHTML = '';
+        connections.forEach(conn => {
+            const e1 = document.getElementById(conn.from);
+            const e2 = document.getElementById(conn.to);
+            if (!e1 || !e2 || e1.closest('.collapsed') || e2.closest('.collapsed')) return;
+            const r1 = e1.getBoundingClientRect();
+            const r2 = e2.getBoundingClientRect();
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', (r1.left - posX) / scale + (r1.width / scale / 2));
+            line.setAttribute('y1', (r1.top - posY) / scale + (18 / scale));
+            line.setAttribute('x2', (r2.left - posX) / scale + (r2.width / scale / 2));
+            line.setAttribute('y2', (r2.top - posY) / scale + (18 / scale));
+            line.setAttribute('stroke', '#ff4757');
+            line.setAttribute('stroke-width', 3 / scale);
+            svg.appendChild(line);
+        });
+    }
+
+    function selectElement(el) {
+        if (selectedElement) selectedElement.classList.remove('selected');
+        selectedElement = el;
+        el.classList.add('selected');
+        el.style.zIndex = ++zStack;
+    }
+
+    function deleteSelected() { if(selectedElement) { selectedElement.remove(); updateLines(); } }
+    function duplicateSelected() {
+        if (!selectedElement || selectedElement.classList.contains('group')) return;
+        createNote(`${selectedElement.offsetLeft + 20}px`, `${selectedElement.offsetTop + 20}px`);
+    }
+
+    function createDrawBoard() {
+        const id = 'draw-' + Date.now();
+        const db = document.createElement('div');
+        db.className = 'note';
+        db.id = id;
+        db.style.left = `${(window.innerWidth/2 - 150 - posX) / scale}px`;
+        db.style.top = `${(window.innerHeight/2 - 125 - posY) / scale}px`;
+        db.style.width = '300px'; db.style.height = '280px';
+        db.innerHTML = `
+            <div class="note-header"><div class="pin" onclick="handlePinClick(this)"></div><input type="color" id="pCol" value="#1a202c"></div>
+            <canvas width="275" height="220"></canvas>
+        `;
+        board.appendChild(db);
+        makeDraggable(db, db.querySelector('.note-header'));
+        const canv = db.querySelector('canvas');
+        const ctx = canv.getContext('2d');
+        let draw = false;
+        canv.onmousedown = () => draw = true;
+        canv.onmouseup = () => { draw = false; ctx.beginPath(); };
+        canv.onmousemove = (e) => {
+            if(!draw) return;
+            const r = canv.getBoundingClientRect();
+            ctx.lineWidth = 3; ctx.strokeStyle = db.querySelector('#pCol').value;
+            ctx.lineTo((e.clientX - r.left)/scale, (e.clientY - r.top)/scale);
+            ctx.stroke();
+        };
+    }
+
+    updateTransform();
+</script>
+</body>
+</html>
